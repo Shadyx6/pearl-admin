@@ -118,15 +118,19 @@ const Add = ({ token }) => {
     });
 
     // Append details (bullet points as JSON)
-    formData.append("details", JSON.stringify(form.details));
+// Append details
+formData.append("details", JSON.stringify(form.details));
 
-    // Append colors and images
-    formData.append("colors", JSON.stringify(form.colors));
-    for (const color of form.colors) {
-      if (form.images[color]) {
-        formData.append("images", form.images[color]);
-      }
-    }
+// Append FAQs ✅
+formData.append("faqs", JSON.stringify(form.faqs));
+
+// Append colors + images
+formData.append("colors", JSON.stringify(form.colors));
+for (const color of form.colors) {
+  if (form.images[color]) {
+    formData.append("images", form.images[color]);
+  }
+}
 
     try {
       await axios.post(`${backendUrl}/api/product/add`, formData, {
