@@ -1,8 +1,8 @@
-// Add.jsx
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
-import { backendUrl } from "../App"; // adjust path if needed
+import imageCompression from "browser-image-compression";
+import { backendUrl } from "../App"; // Adjust path if needed
 
 const Add = ({ token }) => {
   const [form, setForm] = useState({
@@ -17,6 +17,7 @@ const Add = ({ token }) => {
     colors: [],
     images: {}, // { colorName: File }
     faqs: [],
+    size: "",
   });
 
   const [colorInput, setColorInput] = useState("");
@@ -61,7 +62,10 @@ const Add = ({ token }) => {
   // Colors
   const handleAddColor = () => {
     const color = colorInput.trim().toLowerCase();
-    if (!color) return;
+    if (!color) {
+      toast.error("Please enter a color name");
+      return;
+    }
     if (!form.colors.includes(color)) {
       setForm((prev) => ({ ...prev, colors: [...prev.colors, color] }));
     }
@@ -79,23 +83,61 @@ const Add = ({ token }) => {
     });
   };
 
-  // File change (allow any file type)
-  const handleImageChange = (color, file) => {
-  if (!file) {
-    console.log("No file selected for color", color);
-    return;
-  }
-  console.log("Selected file for", color, "->", file.name, file.type, file.size);
-  setForm((prev) => ({
-    ...prev,
-    images: {
-      ...prev.images,
-      [color]: file,
-    },
-  }));
-};
+  // File change (compress and validate images)
+  const handleImageChange = async (color, file) => {
+    if (!file) {
+      console.log("No file selected for color", color);
+      toast.error("No file selected");
+      return;
+    }
 
+    // Compress image if larger than 1MB
+    let processedFile = file;
+    if (file.size > 1 * 1024 * 1024) {
+      try {
+        processedFile = await imageCompression(file, {
+          maxSizeMB: 1,
+          maxWidthOrHeight: 1920,
+        });
+        console.log(`Compressed ${file.name} from ${(file.size / 1024).toFixed(1)} KB to ${(processedFile.size / 1024).toFixed(1)} KB`);
+      } catch (err) {
+        toast.error(`Failed to compress image: ${file.name}`);
+        return;
+      }
+    }
 
+    // Validate file size (match backend limit of 50MB)
+    const maxSizeMB = 50;
+    if (processedFile.size > maxSizeMB * 1024 * 1024) {
+      toast.error(`File "${processedFile.name}" exceeds ${maxSizeMB}MB limit`);
+      return;
+    }
+
+    // Validate image
+    const img = new Image();
+    img.src = URL.createObjectURL(processedFile);
+    img.onload = () => {
+      console.log(`Image ${processedFile.name} dimensions: ${img.width}x${img.height}`);
+      if (img.width < 300 || img.height < 300) {
+        toast.warn(`Image "${processedFile.name}" is low resolution (${img.width}x${img.height})`);
+      }
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = () => {
+      toast.error(`File "${processedFile.name}" is not a valid image`);
+      URL.revokeObjectURL(img.src);
+      return;
+    };
+
+    console.log("Selected file for", color, "->", processedFile.name, processedFile.type, processedFile.size);
+    setForm((prev) => ({
+      ...prev,
+      images: {
+        ...prev.images,
+        [color]: processedFile,
+      },
+    }));
+  };
 
   const handleRemoveFileForColor = (color) => {
     setForm((prev) => {
@@ -107,113 +149,141 @@ const Add = ({ token }) => {
 
   // FAQs
   const handleAddFaq = () => {
-    if (!faqInput.question || !faqInput.answer) return;
+    if (!faqInput.question || !faqInput.answer) {
+      toast.error("Please provide both question and answer for FAQ");
+      return;
+    }
     setForm((prev) => ({ ...prev, faqs: [...prev.faqs, faqInput] }));
     setFaqInput({ question: "", answer: "" });
   };
   const handleRemoveFaq = (idx) =>
     setForm((prev) => ({ ...prev, faqs: prev.faqs.filter((_, i) => i !== idx) }));
 
+  // Retry function for axios
+  const axiosWithRetry = async (config, retries = 3, delay = 1000) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await axios(config);
+      } catch (err) {
+        if (i === retries - 1) throw err;
+        console.warn(`Retry ${i + 1} for axios request: ${err.message}`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  };
+
   // Submit
-const handleSubmit = async (e) => {
-  e.preventDefault();
-  setIsLoading(true);
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
 
-  try {
-    const formData = new FormData();
+    try {
+      // Validate that each color has an image
+      const missingImages = form.colors.filter((color) => !form.images[color]);
+      if (missingImages.length > 0) {
+        toast.error(`Please upload images for colors: ${missingImages.join(", ")}`);
+        setIsLoading(false);
+        return;
+      }
 
-    // Append simple scalar fields (skip arrays & files)
-    const skipKeys = ["colors", "images", "details", "faqs", "variants", "sizes"];
-    Object.entries(form).forEach(([key, value]) => {
-      if (!skipKeys.includes(key)) {
+      if (form.colors.length === 0) {
+        toast.error("Please add at least one color variant");
+        setIsLoading(false);
+        return;
+      }
+
+      if (form.colors.length > 30) {
+        toast.error("Maximum 30 color variants allowed");
+        setIsLoading(false);
+        return;
+      }
+
+      const formData = new FormData();
+
+      // Append scalar fields
+      const scalarFields = {
+        name: form.name,
+        price: form.price,
+        category: form.category,
+        subcategory: form.subcategory,
+        stock: form.stock,
+        bestseller: form.bestseller,
+        description: form.description,
+        size: form.size,
+      };
+
+      Object.entries(scalarFields).forEach(([key, value]) => {
         formData.append(key, value === undefined || value === null ? "" : String(value));
+      });
+
+      // Append arrays as JSON
+      formData.append("details", JSON.stringify(form.details || []));
+      formData.append("faqs", JSON.stringify(form.faqs || []));
+      formData.append("colors", JSON.stringify(form.colors || []));
+
+      // Append variant images
+      form.colors.forEach((color, i) => {
+        const file = form.images[color];
+        if (file) {
+          formData.append(`variantImage${i}`, file);
+          console.log(`Appended variantImage${i}: ${file.name} (${(file.size / 1024).toFixed(1)} KB) for color ${color}`);
+        }
+      });
+
+      // Debug FormData
+      console.log("FormData entries:");
+      for (const [key, value] of formData.entries()) {
+        console.log(`${key}: ${value instanceof File ? `${value.name} (${(value.size / 1024).toFixed(1)} KB)` : value}`);
       }
-    });
 
-    // Arrays / JSON fields
-    formData.append("details", JSON.stringify(form.details || []));
-    formData.append("faqs", JSON.stringify(form.faqs || []));
-    formData.append("colors", JSON.stringify(form.colors || []));
-    // If your backend expects `variants` as JSON, build it here:
-    // For example variants may be [{ color: 'red', stock: 10 }, ...]
-    // If you already build variants on client, append that. Otherwise create simple variants from colors:
-    const variantsPayload = (form.colors || []).map((color, idx) => ({
-      color,
-      stock: 0,
-    }));
-    formData.append("variants", JSON.stringify(variantsPayload));
+      const response = await axiosWithRetry({
+        method: "post",
+        url: `${backendUrl}/api/product/add`,
+        data: formData,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "multipart/form-data",
+        },
+        timeout: 600000, // 10 minutes
+      });
 
-    // Append GENERAL product images as image1..image4 (if any)
-    // If you have a UI to upload separate general images, collect them e.g. form.generalImages = [File,...]
-    // Here we attempt to use first N files from form.images if you haven't separate fields.
-    // But safest: if you have dedicated inputs, append them here directly to image1..image4.
-    // Example: append image1..image4 only if form.generalImages exists:
-    if (form.generalImages && Array.isArray(form.generalImages)) {
-      for (let i = 0; i < Math.min(4, form.generalImages.length); i++) {
-        formData.append(`image${i + 1}`, form.generalImages[i]); // image1..image4
-      }
-    }
-
-    // Append VARIANT IMAGES as variantImage0, variantImage1, ...
-    // Order must match variantsPayload order (i.e., form.colors order)
-    for (let i = 0; i < (form.colors || []).length; i++) {
-      const color = form.colors[i];
-      const file = form.images[color];
-      if (file) {
-        formData.append(`variantImage${i}`, file); // variantImage0, variantImage1, ...
-        console.log("Appended variantImage" + i, file.name, "for color", color);
+      toast.success(response.data?.message || "Product added successfully!");
+      setForm({
+        name: "",
+        price: "",
+        category: "",
+        subcategory: "",
+        stock: "",
+        bestseller: false,
+        description: "",
+        details: [],
+        colors: [],
+        images: {},
+        faqs: [],
+        size: "",
+      });
+    } catch (err) {
+      console.error("Error submitting form:", err);
+      if (err.response) {
+        console.error("Server response:", err.response.status, err.response.data);
+        toast.error(err.response.data?.message || `Failed (${err.response.status})`);
+      } else if (err.code === "ECONNABORTED") {
+        toast.error("Request timed out. Try smaller images or check your network.");
+      } else if (err.code === "ERR_NETWORK") {
+        toast.error("Network error. Please check your connection and try again.");
       } else {
-        console.log("No file for variant index", i, "color", color);
+        toast.error(err.message || "Failed to upload product");
       }
+    } finally {
+      setIsLoading(false);
     }
-
-    // Debug: show what will be sent
-    for (const pair of formData.entries()) {
-      console.log("FormData:", pair[0], pair[1]);
-    }
-
-    const response = await axios.post(`${backendUrl}/api/product/add`, formData, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        // DO NOT set Content-Type manually
-      },
-      timeout: 120000,
-    });
-
-    toast.success(response.data?.message || "Product added successfully!");
-    // Reset form (same as your existing reset)
-    setForm({
-      name: "",
-      price: "",
-      category: "",
-      subcategory: "",
-      stock: "",
-      bestseller: false,
-      description: "",
-      details: [],
-      colors: [],
-      images: {},
-      faqs: [],
-    });
-  } catch (err) {
-    console.error("Error submitting form - full error:", err);
-    if (err.response) {
-      console.error("Server response:", err.response.status, err.response.data);
-      toast.error(err.response.data?.message || `Failed (${err.response.status})`);
-    } else {
-      toast.error(err.message || "Network error");
-    }
-  } finally {
-    setIsLoading(false);
-  }
-};
-
+  };
 
   return (
     <div className="max-w-4xl mx-auto p-6 bg-white rounded-xl shadow-lg">
       <h2 className="text-2xl font-bold text-gray-800 mb-6">Add New Product</h2>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={handleSubmit} encType="multipart/form-data" className="space-y-6">
         {/* Basic */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
@@ -285,6 +355,16 @@ const handleSubmit = async (e) => {
               onChange={handleInputChange}
               className="w-full p-3 border rounded-lg"
               required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium">Size</label>
+            <input
+              name="size"
+              value={form.size}
+              onChange={handleInputChange}
+              className="w-full p-3 border rounded-lg"
             />
           </div>
 
@@ -371,27 +451,36 @@ const handleSubmit = async (e) => {
                     </div>
                   </div>
 
-                  <label className="block text-sm mb-2">Attach file for {color}</label>
-                 <input
-  type="file"
-  accept=".jpg,.jpeg,.png,.webp,.gif,image/*"
-  onChange={(e) => handleImageChange(color, e.target.files?.[0])}
-  className="block w-full text-sm mb-2"
-/>
+                  <label className="block text-sm mb-2">Attach image for {color}</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handleImageChange(color, e.target.files?.[0])}
+                    className="block w-full text-sm mb-2"
+                  />
 
                   {file ? (
                     <div className="flex items-center justify-between">
                       <div className="text-sm">
                         <div className="font-medium">{file.name}</div>
                         <div className="text-xs text-gray-500">{file.type || "unknown type"}</div>
-                        <div className="text-xs text-gray-500"> {(file.size / 1024).toFixed(1)} KB</div>
+                        <div className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</div>
+                        <img
+                          src={URL.createObjectURL(file)}
+                          alt={`Preview for ${color}`}
+                          className="mt-2 h-20 w-20 object-cover rounded"
+                        />
                       </div>
-                      <button type="button" onClick={() => handleRemoveFileForColor(color)} className="text-red-500 text-sm">
-                        Remove File
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFileForColor(color)}
+                        className="text-red-500 text-sm"
+                      >
+                        Remove Image
                       </button>
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-500">No file selected</div>
+                    <div className="text-xs text-gray-500">No image selected</div>
                   )}
                 </div>
               );
@@ -446,7 +535,9 @@ const handleSubmit = async (e) => {
           <button
             type="submit"
             disabled={isLoading}
-            className={`w-full py-3 px-6 rounded-lg font-medium text-white ${isLoading ? "bg-gray-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"}`}
+            className={`w-full py-3 px-6 rounded-lg font-medium text-white ${
+              isLoading ? "bg-gray-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"
+            }`}
           >
             {isLoading ? "Processing..." : "Add Product"}
           </button>
