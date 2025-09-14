@@ -3,7 +3,7 @@ import axios from "axios";
 import { backendUrl, currency } from "../App";
 import { toast } from "react-toastify";
 import { useNavigate , useParams } from "react-router-dom";
-
+//ffgit
 const List = ({ token }) => {
   const { id } = useParams();
 
