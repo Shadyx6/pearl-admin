@@ -5,6 +5,7 @@ import { GoChecklist } from "react-icons/go";
 import { IoCheckmarkDoneCircle } from "react-icons/io5";
 import { FaTags } from "react-icons/fa";
 import { BiSolidCategory } from "react-icons/bi";
+import { FaRegSmileBeam } from "react-icons/fa";
 
 const Sidebar = () => {
   return (
@@ -63,7 +64,7 @@ const Sidebar = () => {
           }
         >
           <BiSolidCategory className="text-gray-800 text-3xl" />
-          <p className="hidden md:block">Sub Category</p>
+          <p className="hidden md:block">Category</p>
         </NavLink>
 
          <NavLink
@@ -74,8 +75,8 @@ const Sidebar = () => {
             }`
           }
         >
-          <BiSolidCategory className="text-gray-800 text-3xl" />
-          <p className="hidden md:block">Happy Customers</p>
+          <FaRegSmileBeam className="text-gray-800 text-3xl" />
+          <p className="hidden md:block">Happy Customer</p>
         </NavLink>
       </div>
     </div>
