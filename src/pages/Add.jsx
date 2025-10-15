@@ -204,26 +204,82 @@ const cancelDetailEdit = () => {
   };
 
   // image change handler
-  const handleImageChange = async (color, file) => {
-    if (!file) return toast.error("No file selected");
-    if (!file.type.startsWith("image/")) return toast.error("Please select a valid image file");
-    if (file.size > MAX_IMAGE_MB * 1024 * 1024) return toast.error(`Image exceeds ${MAX_IMAGE_MB}MB limit`);
 
-    let processed = file;
-    if (file.size > 1 * 1024 * 1024) {
+  const cleanImageBeforeUpload = async (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+
+        // keep transparency for PNG, convert others to JPG
+        const isPng = file.type.includes("png");
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) return reject("Canvas conversion failed");
+            const cleaned = new File(
+              [blob],
+              file.name.replace(/\.\w+$/, isPng ? ".png" : ".jpg"),
+              { type: isPng ? "image/png" : "image/jpeg" }
+            );
+            resolve(cleaned);
+          },
+          isPng ? "image/png" : "image/jpeg",
+          0.9
+        );
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+
+  const handleImageChange = async (color, file) => {
+  if (!file) return toast.error("No file selected");
+  if (!file.type.startsWith("image/")) return toast.error("Please select a valid image file");
+  if (file.size > MAX_IMAGE_MB * 1024 * 1024)
+    return toast.error(`Image exceeds ${MAX_IMAGE_MB}MB limit`);
+
+  try {
+    // 🧩 Always clean gallery images before upload (fixes phone photo errors)
+    const safeFile = await cleanImageBeforeUpload(file);
+
+    let processed = safeFile;
+    if (safeFile.size > 1 * 1024 * 1024) {
       try {
-        processed = await imageCompression(file, {
+        processed = await imageCompression(safeFile, {
           maxSizeMB: 1,
           maxWidthOrHeight: 1920,
           useWebWorker: true,
         });
       } catch {
-        processed = file;
+        processed = safeFile;
       }
     }
 
-    setForm((prev) => ({ ...prev, images: { ...prev.images, [color]: processed } }));
-  };
+    setForm((prev) => ({
+      ...prev,
+      images: { ...prev.images, [color]: processed },
+    }));
+  } catch (err) {
+    console.error("Image cleaning failed:", err);
+    toast.error("Image processing failed — try another image");
+  }
+};
+
+// 🧹 Clean and convert any image before upload (fixes gallery upload issue)
+
+
+
+
 
   const handleVideoChange = (color, file) => {
     if (!file) return toast.error("No video selected");
@@ -231,6 +287,8 @@ const cancelDetailEdit = () => {
     if (file.size > MAX_VIDEO_MB * 1024 * 1024) return toast.error(`Video exceeds ${MAX_VIDEO_MB}MB limit`);
     setVideoFiles((prev) => ({ ...prev, [color]: file }));
   };
+
+  
 
   const axiosWithRetry = async (config, retries = 3, delay = 1000) => {
     for (let i = 0; i < retries; i++) {
