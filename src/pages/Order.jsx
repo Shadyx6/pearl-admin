@@ -73,6 +73,29 @@ const handleAction = async (orderId, action) => {
   }
 };
 
+
+const handleRequestProof = async (orderId) => {
+    try {
+      const cleanId = String(orderId).trim();
+      setLoadingActionId(cleanId);
+
+      const res = await axios.post(
+        `${backendUrl}/api/order/admin/request-proof`,
+        { orderId: cleanId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      toast.success("Email sent to customer to re-upload proof");
+      console.log("Upload link:", res?.data?.uploadLink);
+    } catch (err) {
+      console.error(err);
+      toast.error(err?.response?.data?.message || "Failed to send request");
+    } finally {
+      setLoadingActionId(null);
+    }
+  };
+
+
   if (!token) return <p className="p-4">Please login as admin to view orders.</p>;
 
   return (
@@ -271,6 +294,15 @@ const handleAction = async (orderId, action) => {
                 >
                   {loadingActionId === o._id ? "Processing..." : "Reject"}
                 </button>
+
+                <button
+  onClick={() => handleRequestProof(o._id)}
+  className="px-3 py-2 bg-blue-600 text-white rounded text-sm disabled:opacity-60"
+  disabled={loadingActionId === o._id}
+>
+  {loadingActionId === o._id ? "Sending..." : "Request Proof Again"}
+</button>
+
               </div>
 
               {/* Optional: Action history (if your model has it) */}
