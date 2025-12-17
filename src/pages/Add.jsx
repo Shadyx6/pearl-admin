@@ -238,7 +238,7 @@ const handleVideoChange = async (color, file) => {
     const compressed = await compressVideo(file);
 
     if (compressed.size >= file.size * 0.95) {
-      toast.warning("Compression not effective, using original video");
+      toast.info("Video already optimized — using original");
       setVideoFiles((prev) => ({ ...prev, [color]: file }));
     } else {
       toast.success("✅ Video compressed successfully");

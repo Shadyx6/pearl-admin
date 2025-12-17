@@ -573,9 +573,10 @@ const commitVariantColor = (index) => {
     const file = e.target.files?.[0];
     if (!file) return;
     console.log(file)
-     setIsCompressing(true)
+  
     // Compress if >5MB
     if (file.size > 5 * 1024 * 1024) {
+        setIsCompressing(true)
       toast.info("Compressing video...");
       try {
         // console.log("here")
